@@ -1,92 +1,102 @@
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 
-// Ubah alamat sesuai dengan alamat LCD yang digunakan
+// Inisialisasi objek untuk LCD 16x2 (gunakan alamat I2C LCD Anda)
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-unsigned long mulai, selesai, dataStopWatch;
-int i=0;
-int fPaus = 0;
-long lastButton = 0;
-long delayAntiBouncing = 50;
-long dataPaus = 0;
+// Pin digital untuk tombol antrian dan teller
+const int queueButtonPin = A0;    // Pin A0 sebagai input untuk tombol antrian
+const int tellerButtonPin = A1;   // Pin A1 sebagai input untuk tombol teller
+const int buzzerPin = 8;          // Pin 8 sebagai output untuk buzzer
 
-void setup(){
-  pinMode(A0,INPUT);
-  pinMode(A1,INPUT);
-  digitalWrite(A0,1);
-  digitalWrite(A1,1);
-  lcd.init();
-  lcd.backlight();
-  lcd.setCursor(0, 0);
+// Variabel untuk menyimpan nomor antrian, nomor teller, dan queue karcis
+int queueNumber = 0;   // Nomor Antrian maks 20
+int tellerNumber = 0;  // Inisialisasi nomor teller mulai dari 0
+int queueTicket = 0;   // Queue karcis saat ini
 
-  lcd.setCursor(0, 0); 
-  lcd.print("Arduino Nih Bos");
-  lcd.setCursor(0, 1); 
-  lcd.print("   StopWatch");
-  delay(2000);
-  lcd.clear();
-  lcd.setCursor(1, 0);
-  lcd.print(" Tekan Tombol");
-  lcd.setCursor(1, 1);
-  lcd.print(" Start / Stop");
+// Variabel untuk menyimpan status tombol dan waktu terakhir tombol ditekan
+int lastQueueButtonState = HIGH;
+int lastTellerButtonState = HIGH;
+
+// Fungsi untuk mereset nomor teller menjadi 1
+void resetTeller() {
+  tellerNumber = 1;
 }
 
-void loop(){
-  if (digitalRead(A0)==0){
-    if ((millis() - lastButton) > delayAntiBouncing){
-      if (i==0){
-        lcd.clear();
-        lcd.setCursor(2, 0);
-        lcd.print("Start Timer");
-        mulai = millis();
-        fPaus = 0;
-      }
-      else if (i==1){
-        lcd.setCursor(2, 0);
-        lcd.print("Stop Timer ");
-        dataPaus = dataStopWatch;
-        fPaus = 1;
-      }
-      i =!i;
-    }
-    lastButton = millis();
-  }
-  else if (digitalRead(A1)==0 && fPaus == 1){
-    dataStopWatch = 0;
-    dataPaus = 0;
-    lcd.clear();
-    lcd.print("Reset Stopwatch");
-    delay(2000);
-    lcd.clear();
-    lcd.setCursor(1, 0);
-    lcd.print(" Tekan Tombol");
-    lcd.setCursor(1, 1);
-    lcd.print(" Start / Stop");
-  }
-  if (i==1){
-    selesai = millis();
+// Fungsi untuk mengeluarkan suara bel
+void playBel() {
+  tone(buzzerPin, 1000, 500); // Frekuensi 1000 Hz (suaranya lebih rendah) dengan durasi 500 ms
+  delay(500); // Jeda 500 ms antara bunyi bel
+  noTone(buzzerPin);
+}
 
-    float jam, menit, detik, miliDetik;
-    unsigned long over;
-    dataStopWatch = selesai - mulai;
-    dataStopWatch = dataPaus + dataStopWatch;
-    jam = int(dataStopWatch / 3600000);
-    over = dataStopWatch % 3600000;
-    menit = int(over / 60000);
-    over = over % 60000;
-    detik = int(over / 1000);
-    miliDetik = over % 1000;
-    lcd.setCursor(1, 1);
-    lcd.print(jam, 0);
-    lcd.print(" : ");
-    lcd.print(menit, 0);
-    lcd.print(" : ");
-    lcd.print(detik, 0);
-    lcd.print(" : ");
-    if (jam < 10){
-      lcd.print(miliDetik, 0);
+// Fungsi untuk mengeluarkan bunyi gagal atau penolakan
+void playPenolakan() {
+  tone(buzzerPin, 600, 300); // Frekuensi 600 Hz dengan durasi 300 ms (bunyi pertama)
+  delay(400); // Jeda 400 ms sebelum bunyi selanjutnya
+  tone(buzzerPin, 300, 500); // Frekuensi 300 Hz dengan durasi 500 ms (bunyi kedua)
+  delay(500); // Jeda 500 ms antara bunyi penolakan dan reset
+  noTone(buzzerPin);
+}
+
+void setup() {
+  // Inisialisasi LCD
+  lcd.init();
+  lcd.backlight();
+  lcd.begin(16, 2);
+  lcd.print("Antrian No: -");
+  lcd.setCursor(0, 1);
+  lcd.print("Teller -");
+
+  // Inisialisasi pin sebagai input dengan pull-up resistor internal
+  pinMode(queueButtonPin, INPUT_PULLUP);
+  pinMode(tellerButtonPin, INPUT_PULLUP);
+
+  // Inisialisasi pin buzzer sebagai output
+  pinMode(buzzerPin, OUTPUT);
+}
+
+void loop() {
+  // Baca status tombol antrian
+  int queueButtonState = digitalRead(queueButtonPin);
+
+  // Periksa perubahan status tombol antrian
+  if (queueButtonState != lastQueueButtonState && queueButtonState == LOW) {
+    if ((queueNumber - queueTicket) < 20) {
+      queueNumber++;
+      lcd.setCursor(12, 0);
+      lcd.print("A");
+      lcd.print(queueNumber);
       lcd.print(" ");
+    } else {
+      // Mainkan suara penolakan ketika antrian sudah penuh
+      playPenolakan();
     }
   }
+  lastQueueButtonState = queueButtonState;
+
+  // Baca status tombol teller
+  int tellerButtonState = digitalRead(tellerButtonPin);
+
+  // Periksa perubahan status tombol teller
+  if (tellerButtonState != lastTellerButtonState && tellerButtonState == LOW) {
+    if (queueTicket < queueNumber) {
+      tellerNumber++;
+      if (tellerNumber > 4) {
+        resetTeller(); // Reset nomor teller menjadi 1
+      }
+      queueTicket++; // Tambah queue karcis saat tombol teller ditekan
+      lcd.setCursor(7, 1);
+      lcd.print(tellerNumber);
+      lcd.print(" - A");
+      lcd.print(queueTicket); // Tampilkan queue karcis di sebelah angka teller
+      
+      // Mainkan suara bel ketika tombol teller ditekan
+      playBel();
+    }
+  }
+  lastTellerButtonState = tellerButtonState;
+
+  // Tunggu sebentar sebelum mengulang
+  delay(50);
 }
